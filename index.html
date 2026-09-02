@@ -2,61 +2,432 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>画像合成</title>
 
 <style>
+*{
+    box-sizing:border-box;
+}
+
 body{
-  font-family:sans-serif;
-  margin:20px;
+    margin:0;
+    padding:20px;
+    background:#f3f4f6;
+    font-family:sans-serif;
+}
+
+.container{
+    max-width:900px;
+    margin:auto;
+}
+
+h1{
+    text-align:center;
+}
+
+.toolbar{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    justify-content:center;
+    margin-bottom:20px;
 }
 
 button{
-  padding:10px;
-  margin:5px;
+    border:none;
+    border-radius:8px;
+    padding:12px 16px;
+    background:#1976d2;
+    color:white;
+    cursor:pointer;
+}
+
+button:disabled{
+    opacity:.5;
+}
+
+#operationList{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
 }
 
 .row{
-  border:1px solid #ccc;
-  padding:10px;
-  margin:5px 0;
+    background:white;
+    border-radius:10px;
+    padding:10px;
+    border:1px solid #ddd;
+    display:flex;
+    align-items:center;
+    gap:10px;
+}
+
+.order{
+    min-width:30px;
+    font-size:24px;
+    font-weight:bold;
+}
+
+.preview{
+    width:120px;
+    height:120px;
+    border:1px solid #ccc;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    overflow:hidden;
+}
+
+.preview img{
+    max-width:100%;
+    max-height:100%;
+}
+
+.output{
+    margin-top:20px;
+    text-align:center;
+}
+
+#outputImage{
+    max-width:100%;
+    border:1px solid #ccc;
+    background:
+      linear-gradient(45deg,#eee 25%,transparent 25%),
+      linear-gradient(-45deg,#eee 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#eee 75%),
+      linear-gradient(-45deg,transparent 75%,#eee 75%);
+    background-size:20px 20px;
+}
+
+@media(max-width:600px){
+
+.row{
+    flex-direction:column;
+}
+
+.preview{
+    width:100%;
+    height:180px;
+}
 }
 </style>
 </head>
 <body>
 
+<div class="container">
+
 <h1>画像合成</h1>
 
+<div class="toolbar">
 <button id="addBtn">追加</button>
+<button id="defaultBtn">デフォルト追加</button>
+<button id="exportBtn">PNG出力</button>
+<button id="shareBtn">X共有</button>
+</div>
 
-<div id="list"></div>
+<div id="operationList"></div>
+
+<div class="output">
+<h2>出力結果</h2>
+<img id="outputImage">
+</div>
+
+</div>
+
+<canvas id="canvas" style="display:none"></canvas>
 
 <script>
 
-const addBtn =
-  document.getElementById("addBtn");
+const MAX_ITEMS = 5;
+let dragItem = null;
+let lastOutput = null;
 
-const list =
-  document.getElementById("list");
+const operationList =
+document.getElementById("operationList");
 
-let count = 0;
+function updateOrder(){
 
-addBtn.onclick = function(){
+    const rows =
+    operationList.querySelectorAll(".row");
 
-  count++;
+    rows.forEach((row,index)=>{
+        row.querySelector(".order")
+           .textContent = index + 1;
+    });
 
-  const div =
-    document.createElement("div");
+    const count = rows.length;
 
-  div.className = "row";
+    addBtn.disabled = count >= MAX_ITEMS;
+    defaultBtn.disabled = count >= MAX_ITEMS;
 
-  div.textContent =
-    "操作セット " + count;
+    document
+      .querySelectorAll(".deleteBtn")
+      .forEach(btn=>{
+        btn.disabled = count <= 1;
+      });
+}
 
-  list.appendChild(div);
+function createDefaultImage(){
+
+    const c =
+      document.createElement("canvas");
+
+    c.width = 500;
+    c.height = 500;
+
+    const ctx = c.getContext("2d");
+
+    ctx.fillStyle="#2196f3";
+    ctx.fillRect(0,0,500,500);
+
+    ctx.fillStyle="white";
+    ctx.beginPath();
+    ctx.arc(250,250,150,0,Math.PI*2);
+    ctx.fill();
+
+    return c.toDataURL("image/png");
+}
+
+function addRow(defaultImage){
+
+    const row =
+      document.createElement("div");
+
+    row.className = "row";
+    row.draggable = true;
+
+    row.innerHTML = `
+      <div class="order"></div>
+
+      <div class="preview">
+        <img>
+      </div>
+
+      <input type="file"
+      accept=".jpg,.jpeg,.png">
+
+      <button class="deleteBtn">
+      削除
+      </button>
+    `;
+
+    const img =
+      row.querySelector("img");
+
+    const file =
+      row.querySelector("input");
+
+    row.imageData = null;
+
+    if(defaultImage){
+        img.src = defaultImage;
+        row.imageData = defaultImage;
+    }
+
+    file.addEventListener("change",e=>{
+
+        const f = e.target.files[0];
+
+        if(!f)return;
+
+        const reader =
+          new FileReader();
+
+        reader.onload = ev=>{
+
+            img.src = ev.target.result;
+            row.imageData = ev.target.result;
+        };
+
+        reader.readAsDataURL(f);
+    });
+
+    row.querySelector(".deleteBtn")
+       .addEventListener("click",()=>{
+
+        row.remove();
+        updateOrder();
+    });
+
+    row.addEventListener("dragstart",()=>{
+        dragItem = row;
+    });
+
+    row.addEventListener("dragover",e=>{
+        e.preventDefault();
+    });
+
+    row.addEventListener("drop",e=>{
+
+        e.preventDefault();
+
+        if(row===dragItem)return;
+
+        const rect =
+          row.getBoundingClientRect();
+
+        if(
+           e.clientY >
+           rect.top + rect.height/2
+        ){
+            row.after(dragItem);
+        }
+        else{
+            row.before(dragItem);
+        }
+
+        updateOrder();
+    });
+
+    operationList.appendChild(row);
+
+    updateOrder();
+}
+
+async function createMergedImage(){
+
+    const rows =
+      [...operationList.children]
+      .filter(r=>r.imageData);
+
+    if(rows.length===0){
+
+        alert("画像を選択してください");
+        return null;
+    }
+
+    const images=[];
+
+    for(const row of rows){
+
+        const img = new Image();
+
+        await new Promise(resolve=>{
+
+            img.onload = resolve;
+            img.src = row.imageData;
+        });
+
+        images.push(img);
+    }
+
+    const maxWidth =
+      Math.max(...images.map(i=>i.width));
+
+    const maxHeight =
+      Math.max(...images.map(i=>i.height));
+
+    const canvas =
+      document.getElementById("canvas");
+
+    canvas.width = maxWidth;
+    canvas.height = maxHeight;
+
+    const ctx =
+      canvas.getContext("2d");
+
+    ctx.clearRect(
+      0,0,
+      canvas.width,
+      canvas.height
+    );
+
+    images.forEach(img=>{
+
+        const x =
+          (canvas.width-img.width)/2;
+
+        const y =
+          (canvas.height-img.height)/2;
+
+        ctx.drawImage(img,x,y);
+    });
+
+    return canvas.toDataURL("image/png");
+}
+
+addBtn.onclick=()=>{
+    addRow();
 };
 
-</script>
+defaultBtn.onclick=()=>{
+    addRow(createDefaultImage());
+};
 
+exportBtn.onclick=async()=>{
+
+    const data =
+      await createMergedImage();
+
+    if(!data)return;
+
+    lastOutput=data;
+
+    outputImage.src=data;
+
+    const a =
+      document.createElement("a");
+
+    a.href=data;
+    a.download="merged.png";
+
+    a.click();
+};
+
+shareBtn.onclick=async()=>{
+
+    if(!lastOutput){
+        lastOutput =
+          await createMergedImage();
+    }
+
+    if(!lastOutput)return;
+
+    try{
+
+        const blob =
+          await (await fetch(lastOutput))
+          .blob();
+
+        const file =
+          new File(
+            [blob],
+            "merged.png",
+            {type:"image/png"}
+          );
+
+        if(
+           navigator.canShare &&
+           navigator.canShare({
+             files:[file]
+           })
+        ){
+
+            await navigator.share({
+                files:[file],
+                title:"画像合成"
+            });
+        }
+        else{
+
+            window.open(
+              "https://twitter.com/intent/tweet?text=画像合成しました",
+              "_blank"
+            );
+        }
+
+    }catch{
+
+        window.open(
+          "https://twitter.com/intent/tweet?text=画像合成しました",
+          "_blank"
+        );
+    }
+};
+
+addRow();
+
+</script>
 </body>
 </html>
