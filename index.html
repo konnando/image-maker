@@ -333,15 +333,39 @@ async function createMergedImage(){
       canvas.height
     );
 
-    images.forEach(img=>{
+let drawWidth = img.width;
+let drawHeight = img.height;
 
-        const x =
-          (canvas.width-img.width)/2;
+if(
+    img.src.includes("startbutton.png")
+){
+    const scale =
+      Math.min(
+        canvas.width / img.width,
+        canvas.height / img.height,
+        1
+      );
 
-        const y =
-          (canvas.height-img.height)/2;
+    drawWidth =
+      img.width * scale;
 
-        ctx.drawImage(img,x,y);
+    drawHeight =
+      img.height * scale;
+}
+
+const x =
+   (canvas.width - drawWidth) / 2;
+
+const y =
+   (canvas.height - drawHeight) / 2;
+
+ctx.drawImage(
+   img,
+   x,
+   y,
+   drawWidth,
+   drawHeight
+);
     });
 
     return canvas.toDataURL("image/png");
