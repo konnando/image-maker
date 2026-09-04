@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>画像合成</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; touch-action: none; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #111;
+    color: #fff;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px;
+    overflow-x: hidden;
+  }
+  h1 { font-size: 1.4rem; margin: 8px 0 12px; }
+  .btn-row {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    max-width: 420px;
+    margin-bottom: 12px;
+  }
+  button, label.btn {
+    flex: 1;
+    padding: 14px 8px;
+    font-size: 0.95rem;
+    border: none;
+    border-radius: 10px;
+    background: #1da1f2;
+    color: #fff;
+    font-weight: 600;
+    text-align: center;
+    cursor: pointer;
+  }
+  button:active, label.btn:active { opacity: 0.8; }
+  label.btn { background: #28a745; display: flex; align-items: center; justify-content: center; }
+  #howToBtn { background: #6c757d; }
+  #fileInput { display: none; }
+
+  #viewArea {
+    width: 100%;
+    max-width: 420px;
+    background: #222;
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 16px;
+  }
+  #previewWrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    touch-action: none;
+  }
+  #previewCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .hint {
+    margin-top: 10px;
+    font-size: 0.8rem;
+    color: #aaa;
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  /* 使い方オーバーレイ */
+  #howtoDiv {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.92);
+    z-index: 1000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  #howtoDiv.active { display: flex; }
+  #howtoDiv img {
+    max-width: 100%;
+    max-height: 90vh;
+    border-radius: 8px;
+  }
+  #howtoDiv .close-hint {
+    position: absolute;
+    bottom: 24px;
+    left: 0; right: 0;
+    text-align: center;
+    color: #ccc;
+    font-size: 0.9rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>画像合成</h1>
+
+<div class="btn-row">
+  <label class="btn" for="fileInput">ファイル追加</label>
+  <input type="file" id="fileInput" accept="image/jpeg,image/png,image/jpg,.jpeg,.jpg,.png">
+  <button id="tweetBtn">ツイート</button>
+  <button id="howToBtn">使い方</button>
+</div>
+
+<div id="viewArea">
+  <div id="previewWrap">
+    <canvas id="previewCanvas"></canvas>
+  </div>
+  <div class="hint">
+    1本指でドラッグ → 移動<br>
+    2本指でピンチ → 拡大・縮小
+  </div>
+</div>
+
+<div id="howtoDiv">
+  <img src="howto.jpg" alt="使い方">
+  <div class="close-hint">画面をタップして閉じる</div>
+</div>
+
+<script>
+(function() {
+  const fileInput = document.getElementById('fileInput');
+  const previewWrap = document.getElementById('previewWrap');
+  const canvas = document.getElementById('previewCanvas');
+  const ctx = canvas.getContext('2d');
+  const tweetBtn = document.getElementById('tweetBtn');
+  const howToBtn = document.getElementById('howToBtn');
+  const howtoDiv = document.getElementById('howtoDiv');
+
+  let userImg = null;
+  let playBtnImg = null;
+
+  // 表示状態
+  let scale = 1;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  // タッチ操作用
+  let lastTouchDist = 0;
+  let lastTouchMid = { x: 0, y: 0 };
+  let isDragging = false;
+  let lastTouchPos = { x: 0, y: 0 };
+
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
+  }
+
+  // 初期化
+  Promise.all([
+    loadImage('startbutton.png').then(img => { userImg = img; }),
+    loadImage('play_button_modified.png').then(img => { playBtnImg = img; })
+  ]).then(() => {
+    resetView();
+    draw();
+  }).catch(err => {
+    console.warn('画像読み込み失敗', err);
+    canvas.width = 300;
+    canvas.height = 300;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(0, 0, 300, 300);
+    ctx.fillStyle = '#fff';
+    ctx.font = '16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('画像を追加してください', 150, 150);
+  });
+
+  function resetView() {
+    if (!userImg) return;
+    const size = Math.min(previewWrap.clientWidth, 420);
+    canvas.width = size;
+    canvas.height = size;
+
+    // 画像が正方形ビューに収まる初期スケール
+    const fitScale = Math.min(size / userImg.width, size / userImg.height);
+    scale = fitScale;
+    offsetX = (size - userImg.width * scale) / 2;
+    offsetY = (size - userImg.height * scale) / 2;
+  }
+
+  function draw() {
+    if (!userImg) return;
+    const size = canvas.width;
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, size, size);
+
+    ctx.save();
+    ctx.translate(offsetX, offsetY);
+    ctx.scale(scale, scale);
+    ctx.drawImage(userImg, 0, 0);
+    ctx.restore();
+  }
+
+  // ファイル選択
+  fileInput.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    loadImage(url).then(img => {
+      userImg = img;
+      resetView();
+      draw();
+      URL.revokeObjectURL(url);
+    });
+  });
+
+  // ===== タッチ操作 =====
+  function getTouchPos(touch) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: touch.clientX - rect.left,
+      y: touch.clientY - rect.top
+    };
+  }
+
+  function getDistance(t1, t2) {
+    const dx = t1.clientX - t2.clientX;
+    const dy = t1.clientY - t2.clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  function getMidpoint(t1, t2) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (t1.clientX + t2.clientX) / 2 - rect.left,
+      y: (t1.clientY + t2.clientY) / 2 - rect.top
+    };
+  }
+
+  canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      isDragging = true;
+      lastTouchPos = getTouchPos(e.touches[0]);
+    } else if (e.touches.length === 2) {
+      isDragging = false;
+      lastTouchDist = getDistance(e.touches[0], e.touches[1]);
+      lastTouchMid = getMidpoint(e.touches[0], e.touches[1]);
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (!userImg) return;
+
+    if (e.touches.length === 1 && isDragging) {
+      // パン
+      const pos = getTouchPos(e.touches[0]);
+      offsetX += pos.x - lastTouchPos.x;
+      offsetY += pos.y - lastTouchPos.y;
+      lastTouchPos = pos;
+      draw();
+    } else if (e.touches.length === 2) {
+      // ピンチズーム
+      const dist = getDistance(e.touches[0], e.touches[1]);
+      const mid = getMidpoint(e.touches[0], e.touches[1]);
+
+      if (lastTouchDist > 0) {
+        const zoomFactor = dist / lastTouchDist;
+        // 中心点を基準にズーム
+        offsetX = mid.x - (mid.x - offsetX) * zoomFactor;
+        offsetY = mid.y - (mid.y - offsetY) * zoomFactor;
+        scale *= zoomFactor;
+        // 極端な拡大縮小を制限
+        scale = Math.max(0.1, Math.min(scale, 8));
+      }
+      lastTouchDist = dist;
+      lastTouchMid = mid;
+      draw();
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', e => {
+    if (e.touches.length < 2) lastTouchDist = 0;
+    if (e.touches.length === 0) isDragging = false;
+  });
+
+  canvas.addEventListener('touchcancel', () => {
+    isDragging = false;
+    lastTouchDist = 0;
+  });
+
+  // ===== 最終合成 =====
+  function createComposite() {
+    if (!userImg || !playBtnImg) {
+      alert('画像が読み込まれていません');
+      return null;
+    }
+
+    // 現在のビューポート（キャンバス）に表示されている範囲を切り出す
+    const viewSize = canvas.width;
+
+    // ユーザー画像の実際の描画サイズ
+    const imgDrawW = userImg.width * scale;
+    const imgDrawH = userImg.height * scale;
+
+    // 最終キャンバスサイズ（表示されている範囲の大きさ）
+    const finalSize = viewSize; // 正方形
+
+    const out = document.createElement('canvas');
+    out.width = finalSize;
+    out.height = finalSize;
+    const octx = out.getContext('2d');
+
+    // 透明背景
+    octx.clearRect(0, 0, finalSize, finalSize);
+
+    // ユーザー画像を現在のオフセット・スケールで描画
+    octx.save();
+    octx.translate(offsetX, offsetY);
+    octx.scale(scale, scale);
+    octx.drawImage(userImg, 0, 0);
+    octx.restore();
+
+    // playボタンを中央に配置（大きい場合はフィット）
+    let btnW = playBtnImg.width;
+    let btnH = playBtnImg.height;
+
+    // ユーザー画像の実際に見えている部分のサイズを基準にフィット判定
+    // 簡易的に最終サイズを基準にする
+    if (btnW > finalSize || btnH > finalSize) {
+      const ratio = Math.min(finalSize / btnW, finalSize / btnH);
+      btnW *= ratio;
+      btnH *= ratio;
+    }
+
+    const bx = (finalSize - btnW) / 2;
+    const by = (finalSize - btnH) / 2;
+    octx.drawImage(playBtnImg, 0, 0, playBtnImg.width, playBtnImg.height, bx, by, btnW, btnH);
+
+    return out;
+  }
+
+  // ツイート
+  tweetBtn.addEventListener('click', async () => {
+    const composite = createComposite();
+    if (!composite) return;
+
+    composite.toBlob(async (blob) => {
+      if (!blob) {
+        alert('画像生成に失敗しました');
+        return;
+      }
+
+      if (navigator.share && navigator.canShare) {
+        const file = new File([blob], 'composite.png', { type: 'image/png' });
+        const shareData = { files: [file], title: '画像合成' };
+        if (navigator.canShare(shareData)) {
+          try {
+            await navigator.share(shareData);
+            return;
+          } catch (err) {
+            if (err.name !== 'AbortError') console.warn(err);
+          }
+        }
+      }
+
+      // フォールバック
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'composite.png';
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setTimeout(() => {
+        window.open('https://twitter.com/intent/tweet?text=' + encodeURIComponent('画像を合成しました'), '_blank');
+      }, 400);
+    }, 'image/png');
+  });
+
+  // 使い方
+  function showHowto() { howtoDiv.classList.add('active'); }
+  function hideHowto() { howtoDiv.classList.remove('active'); }
+
+  howToBtn.addEventListener('click', showHowto);
+  howtoDiv.addEventListener('click', hideHowto);
+
+  // Cookie（初回のみ表示）
+  function getCookie(name) {
+    const m = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return m ? m[2] : null;
+  }
+  function setCookie(name, value, days) {
+    const d = new Date();
+    d.setTime(d.getTime() + days * 864e5);
+    document.cookie = `${name}=${value};expires=${d.toUTCString()};path=/`;
+  }
+
+  if (!getCookie('howto_shown')) {
+    setTimeout(() => {
+      showHowto();
+      setCookie('howto_shown', '1', 365);
+    }, 600);
+  }
+
+  // リサイズ対応
+  window.addEventListener('resize', () => {
+    if (userImg) {
+      // 簡易的に再フィット
+      const oldSize = canvas.width;
+      resetView();
+      // スケール感をある程度維持したい場合はここに調整を入れる
+      draw();
+    }
+  });
+})();
+</script>
+</body>
+</html>
