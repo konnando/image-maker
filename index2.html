@@ -97,6 +97,40 @@
     color: #ccc;
     font-size: 0.9rem;
   }
+   /* 共有失敗時の結果表示オーバーレイ */
+  #resultOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.95);
+    z-index: 1100;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  #resultOverlay.active {
+    display: flex;
+  }
+  #resultOverlay img {
+    max-width: 100%;
+    max-height: 75vh;
+    border-radius: 8px;
+    background: #222;
+  }
+  #resultOverlay .msg {
+    margin: 16px 0 12px;
+    font-size: 0.95rem;
+    color: #ccc;
+    text-align: center;
+    line-height: 1.5;
+  }
+  #resultOverlay button {
+    padding: 12px 32px;
+    font-size: 1rem;
+    background: #555;
+    border-radius: 8px;
+  }
 </style>
 </head>
 <body>
@@ -134,7 +168,10 @@
   const tweetBtn = document.getElementById('tweetBtn');
   const howToBtn = document.getElementById('howToBtn');
   const howtoDiv = document.getElementById('howtoDiv');
-
+  const resultOverlay = document.getElementById('resultOverlay');
+  const resultImg = document.getElementById('resultImg');
+  const closeResultBtn = document.getElementById('closeResultBtn');
+ 
   let userImg = null;
   let playBtnImg = null;
 
@@ -355,30 +392,40 @@
         return;
       }
 
+      // Web Share API を試す
       if (navigator.share && navigator.canShare) {
         const file = new File([blob], 'composite.png', { type: 'image/png' });
         const shareData = { files: [file], title: '画像合成' };
         if (navigator.canShare(shareData)) {
           try {
             await navigator.share(shareData);
-            return;
+            return; // 成功したら終了
           } catch (err) {
-            if (err.name !== 'AbortError') console.warn(err);
+            // ユーザーがキャンセルした場合は何もしない
+            if (err.name === 'AbortError') return;
+            console.warn(err);
           }
         }
       }
 
-      // フォールバック
+      // 共有できなかった場合 → 画像を表示して長押し保存できるようにする
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'composite.png';
-      a.click();
-      URL.revokeObjectURL(url);
+      resultImg.src = url;
+      resultOverlay.classList.add('active');
 
-      setTimeout(() => {
-        window.open('https://twitter.com/intent/tweet?text=' + encodeURIComponent('画像を合成しました'), '_blank');
-      }, 400);
+      // 閉じたときにURLを解放
+      const close = () => {
+        resultOverlay.classList.remove('active');
+        URL.revokeObjectURL(url);
+        resultImg.src = '';
+        closeResultBtn.removeEventListener('click', close);
+        resultOverlay.removeEventListener('click', onOverlayClick);
+      };
+      const onOverlayClick = (e) => {
+        if (e.target === resultOverlay) close();
+      };
+      closeResultBtn.addEventListener('click', close);
+      resultOverlay.addEventListener('click', onOverlayClick);
     }, 'image/png');
   });
 
@@ -419,5 +466,11 @@
   });
 })();
 </script>
+ <!-- 共有失敗時の結果表示 -->
+<div id="resultOverlay">
+  <img id="resultImg" alt="合成結果">
+  <div class="msg">長押しして画像を保存できます</div>
+  <button id="closeResultBtn">閉じる</button>
+</div>
 </body>
 </html>
